@@ -1,17 +1,16 @@
  /*  the radian_trx SW shall not be distributed  nor used for commercial product*/
  /*  it is exposed just to demonstrate CC1101 capability to reader water meter indexes */
 
-#define METER_YEAR              22
-#define METER_SERIAL            828979
+#define METER_YEAR      22
+#define METER_SERIAL    828979
 
-#define MQTT_HOST "192.168.1.8"
-#define MQTT_PORT  1883
-#define MQTT_USER ""
-#define MQTT_PASS ""
-
-
-#define MQTT_KEEP_ALIVE 300
-#define MQTT_MSG_MAX_SIZE  512
+#define MQTT_HOST   "192.168.1.8"
+#define MQTT_PORT   1883
+#define MQTT_USER   ""
+#define MQTT_PASS   ""
+#define MQTT_TOPIC  "everblu/"
+#define MQTT_KEEP_ALIVE     300
+#define MQTT_MSG_MAX_SIZE   512
 
 
 #include <stdio.h>
@@ -21,6 +20,8 @@
 
 #include "everblu_meters.h"
 #include "cc1101.c"
+
+struct tmeter_data meter_data;
 
 void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *message)
 {
@@ -60,36 +61,94 @@ void my_log_callback(struct mosquitto *mosq, void *userdata, int level, const ch
 
 }
 
-void printMeterData(struct tmeter_data * data)
+void printMeterData(struct tmeter_data * data , char * json_data)
 {
-    printf("Liters  : %d\r\n", data->liters);
-    printf("Battery : %d months\r\n ", data->battery_left);
-    printf("Counter : %d\r\n", data->reads_counter);
-    printf("Rzding  : from %d to %d\r\n ", data->time_start, data->time_end);
-}
+    time_t rawtime;
+    struct tm * timeinfo;
+    time ( &rawtime );
+    timeinfo = localtime ( &rawtime );
 
+    printf("Consumption   : %d Liters\r\n", data->liters);
+    printf("Battery left  : %d Months\r\n", data->battery_left);
+    printf("Read counter  : %d times\r\n", data->reads_counter);
+    printf("Working hours : from %02dH to %02dH\r\n", data->time_start, data->time_end);
+    printf("Local Time    : %s\r\n", asctime(timeinfo));
+
+    if (json_data) {
+        sprintf(json_data, "{ \"liters\":%d, \"battery\":%d, \"read\":%d, \"hours\":\"%02d-%02d\", \"time\":\"%s\" }", 
+                data->liters, data->battery_left, data->reads_counter, 
+                data->time_start, data->time_end, asctime (timeinfo) );
+    }
+}
 
 void IO_init(void)
 {
 	wiringPiSetup();
 	pinMode (GDO2, INPUT);
-	pinMode (GDO0, INPUT);           
+	pinMode (GDO0, INPUT);
+    #ifdef LED_RED
+	pinMode (LED_RED, OUTPUT);
+    digitalWrite(LED_RED, LOW);
+    #endif
+    #ifdef LED_GRN
+    // Light green LED
+	pinMode (LED_GRN, OUTPUT);
+    digitalWrite(LED_GRN, HIGH);
+    #endif
+    #ifdef LED_BLU
+	pinMode (LED_BLU, OUTPUT);
+    digitalWrite(LED_BLU, LOW);
+    #endif
 }
 
+bool scan_frequency(float _frequency) 
+{
+    bool ret = false;
+    printf("Test frequency : %.4fMHz => ", _frequency);
+    fflush(stdout);
+    cc1101_init(_frequency, false);
+    meter_data = get_meter_data();
+    // Got datas ?
+    if (meter_data.reads_counter != 0 || meter_data.liters != 0) {
+        ret = true;
+        printMeterData(&meter_data, NULL);
+    } else {
+        printf("No answer\r\n");
+    }
+    return ret;
+}
 
 int main(int argc, char *argv[])
 {
-	struct tmeter_data meter_data;
 	struct mosquitto *mosq = NULL;
 	char buff[MQTT_MSG_MAX_SIZE];
-	char meter_id[12];
+	char meter_id[32];
 	char mqtt_topic[64];
-	//float frequency = 0.0f; // Set to 0 to scan
-	float frequency = 433.8200f; // Set your frequency
-	float f_start = 0.0f;
-    float f_end = 0.0f;
+	float frequency ;
 
-	sprintf(meter_id, "%i_%i", METER_YEAR, METER_SERIAL);
+    if ( argc != 2 ) {
+        printf("usage: ./everblu_meters [frequency]\n");
+        printf("./everblu_meters 433.82\n");
+        printf("use 0 to start a frequency scan\n");
+        printf("./everblu_meters 0\n");
+        exit(1);
+    }
+
+    frequency = atof(argv[1]);
+    if ( frequency !=0 && (frequency < 432.0f || frequency > 435.0f) ) {
+        printf("wrong frequency %.4f\n", frequency);
+        exit(1);
+    }
+
+	sprintf(meter_id, "cyble-%02d-%07d-pi", METER_YEAR, METER_SERIAL);
+	IO_init();
+
+	if (!cc1101_init(433.8200f, true)) {
+		printf("CC1101 Not found, check wiring!\n");
+        exit(1);
+	}
+
+    printf("CC1101 found OK!\n");
 
 	mosquitto_lib_init();
 	mosq = mosquitto_new(NULL, true, NULL);
@@ -120,70 +179,69 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	IO_init();
+    printf("\r\n");
+    if (frequency == 0.0f) {
+        // Scan al frequencies and blink Blue Led
+        frequency = 433.8200f;
+        float fdev = 0.0000f;
+        while (frequency >= 433.7600f && frequency <= 433.8900f ) {
+            // Blink blue when scanning
+            #ifdef LED_BLU
+            digitalWrite(LED_BLU, HIGH);
+            delay(250);
+            digitalWrite(LED_BLU, LOW);
+            #endif
+            scan_frequency(433.8200f + fdev);
+            scan_frequency(433.8200f - fdev);
+            fdev = fdev + 0.0005f;
+        }
 
-	if (!cc1101_init(433.8200f, true)) {
-		printf("\r\nCC1101 Not found, check wiring!\r\n");
-	} else {
-		printf("\r\n");
-		if (frequency == 0.0f) {
-			// Scan al frequencies and blink Blue Led
-			frequency = 433.8200f;
-			float fdev = 0.0000f;
-			while (frequency >= 433.7600f && frequency <= 433.8900f ) {
-				frequency = 433.8200f + fdev;
-				printf("Test frequency : %.4fMHz => ", frequency);
-				fflush(stdout);
-				cc1101_init(frequency, false);
-				meter_data = get_meter_data();
-				// Got datas ?
-				if (meter_data.reads_counter != 0 || meter_data.liters != 0) {
-					printMeterData(&meter_data);
-				} else {
-					printf("No answer\r\n");
-				}
+    } else {
 
-				frequency = 433.8200f - fdev;
-				printf("Test frequency : %.4fMHz => ", frequency);
-				fflush(stdout);
-				cc1101_init(frequency, false);
-				meter_data = get_meter_data();
-				// Got datas ?
-				if (meter_data.reads_counter != 0 || meter_data.liters != 0) {
-					printMeterData(&meter_data);
-				} else {
-					printf("No answer\r\n");
-				}
-				fdev = fdev + 0.0005f;
-			}
+        #ifdef LED_RED
+        digitalWrite(LED_RED, HIGH);
+        #endif
+        cc1101_init(frequency, false);
+        meter_data = get_meter_data();
+        #ifdef LED_RED
+        digitalWrite(LED_RED, LOW);
+        #endif
+    
+        // Got datas ?
+        if (meter_data.reads_counter != 0 || meter_data.liters != 0) {
+            printMeterData(&meter_data, buff);
+            sprintf(mqtt_topic, MQTT_TOPIC "%s/json", meter_id);
+            mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
-			// Found frequency Range, setup in the middle
-			if (f_start || f_end) {
-				printf( "Working from %.4fMHz to %.4fMhz\r\n", f_start, f_end);
-				frequency = (f_end - f_start) / 2;
-				frequency += f_start ;
-			} else {
-				printf("Not found a working Frequency!\r\n");
-				frequency = 0.0f;
-			}
-		}
+            sprintf(mqtt_topic, MQTT_TOPIC "%s/liters", meter_id);
+            sprintf(buff, "%d", meter_data.liters );
+            mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
-		if (frequency != 0.0f) {
-			cc1101_init(frequency, true);
-			meter_data = get_meter_data();
-		
-			// Got datas ?
-			if (meter_data.reads_counter != 0 || meter_data.liters != 0) {
-				printMeterData(&meter_data);
-				sprintf(buff, "%d", meter_data.liters);
-				sprintf(mqtt_topic, "homeassistant/sensor/cyblemeter_%s/state", meter_id);
-				mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,false);
-			}
-		}
-	}
+            sprintf(mqtt_topic, MQTT_TOPIC "%s/battery", meter_id);
+            sprintf(buff, "%d", meter_data.battery_left );
+            mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
+
+            sprintf(mqtt_topic, MQTT_TOPIC "%s/counter", meter_id);
+            sprintf(buff, "%d", meter_data.reads_counter );
+            mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
+
+            delay(1000);
+        }
+    }
 
 	mosquitto_destroy(mosq);
 	mosquitto_lib_cleanup();
+
+    // Clear all LED
+    #ifdef LED_RED
+    digitalWrite(LED_RED, LOW);
+    #endif
+    #ifdef LED_GRN
+    digitalWrite(LED_GRN, LOW);
+    #endif
+    #ifdef LED_BLU
+    digitalWrite(LED_BLU, LOW);
+    #endif
 
 	return 0;
 }
