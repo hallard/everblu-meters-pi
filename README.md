@@ -1,53 +1,76 @@
-# everblu-meters - Water usage data for Home Assistant
-Fetch water/gas usage data from Cyble EverBlu meters using RADIAN protocol on 433Mhz. Integrated with Home Assistant via MQTT. 
+# everblu-meters - Water usage data for MQTT
 
-Note: HASS autodiscovery is still missing, during development.
+Fetch water/gas usage data from Cyble EverBlu meters using RADIAN protocol on 433Mhz. Integrated with MQTT. 
 
 Meters supported:
 - Itron EverBlu Cyble Enhanced
 
+Software original code (but also all the hard work to get thingd working was originaly done [here][4] then put on github by @neutrinus [here][5].
+
+I added some changes to the original firmware to work with my custom [shield][7] (including leds control), just plug, and play.
 
 ## Hardware
-![Raspberry Pi Zero with CC1101](board.jpg)
-The project runs on Raspberry Pi with an RF transreciver (CC1101). 
 
-### Connections (rpi to CC1101):
-- pin 1 (3V3) to pin 2 (VCC)
-- pin 6 (GND) to pin 1 (GND)
-- pin 11 (GPIO0	) to pin 3 (GDO0)
-- pin 24 (CE0) to pin 4 (CSN)
-- pin 23 (SCLK) to pin 5 (SCK)
-- pin 19 (MOSI) to pin 6 (MOSI)
-- pin 21 (MISO) to pin 7 (MISO)
-- pin 13 (GPIO27) to pin 8 (GD02)
+![With CC1101 Custom Mini Shield](pictures/cc1101-pi-spring.jpg)
+
+The project runs on Raspberry Pi with an RF transreciver (CC1101). Check the dedicated [repo][7]
 
 
 ## Configuration
+
 1. Enable SPI in raspi-config.
 2. Install WiringPi from https://github.com/WiringPi/WiringPi/
 3. Install libmosquitto-dev: `apt install libmosquitto-dev`
 4. Set meter serial number and production date in `everblu_meters.c`, it can be found on the meter label itself:
-![Cyble Meter Label](meter_label.png)
-5. Configure MQTT connection details in `everblu_meters.c`: `MQTT_HOST`, `MQTT_USER`, 'MQTT_PASS`
-5. Compile the code with `make`
-6. Run `everblu_meters`, after ~2s your meter data should be on the screen and data should be pushed to MQTT.
+![Cyble Meter Label](pictures/meter_label.png)
+5. Configure MQTT connection details in `everblu_meters.c`: `MQTT_HOST`, `MQTT_USER`, `MQTT_PASS`
+6. Compile the code with `make`
 7. Setup crontab to run it twice a day
+
+
+To run with found frequency (works with default frequency here)
+
+```shell
+pi@raspberrypi:~/everblu-meters-pi $ ./everblu_meters 433.82
+```
 
 ## Troubleshooting
 
 ### Frequency adjustment
-Your transreciver module may be not calibrated correctly, please modify frequency a bit lower or higher and try again. You may use RTL-SDR to measure the offset needed.
+Your transreciver module may be not calibrated correctly, please find working frequency as follow
 
+To scan frequencies
+```shell
+./everblu_meters 0 
+```
 
 ### Business hours
-Your meter may be configured in such a way that is listens for request only during hours when data collectors work - to conserve energy. If you are unable to communicate with the meter, please try again during business hours (8-16).
+
+Your meter may be configured in such a way that is listens for request only during hours when data collectors work - to conserve energy. 
+If you are unable to communicate with the meter, please try again during business hours (8-16).
+
+
+```shell
+pi@raspberrypi:~/everblu-meters-pi $ ./everblu_meters 433.82
+CC1101 Version : 0x14
+CC1101 found OK!
+Consumption   : 467404 Liters
+Battery left  : 173 Months
+Read counter  : 165 times
+Working hours : from 06H to 18H
+```
+
+Mine are 06H to 18H, don't know if they are UTC or local time with daligh saving.
 
 ### Serial number starting with 0
+
 Please ignore the leading 0, provide serial in configuration without it.
 
 
 ### Save power
+
 The meter has internal battery, which should last for 10 years when queried once a day. 
+
 
 ## Origin and license
 
@@ -62,4 +85,21 @@ The license is unknown, citing one of the authors (fred):
 # Links
 
 There is a very nice port to ESP8266/ESP32: https://github.com/psykokwak-com/everblu-meters-esp8266
+
+## Misc
+
+See news and other projects on my [blog][2] 
+
+[1]: https://www.cdebyte.com/products/E07-M1101S
+[2]: https://hallard.me
+[3]: https://oshpark.com/shared_projects/BVwV2j3b
+[4]: http://www.lamaisonsimon.fr/wiki/doku.php?id=maison2:compteur_d_eau:compteur_d_eau
+[5]: https://github.com/neutrinus/everblu-meters
+[6]: https://github.com/hallard/everblu-meters-pi
+[7]: https://github.com/hallard/cc1101-e07-pi
+
+
+
+
+
 
