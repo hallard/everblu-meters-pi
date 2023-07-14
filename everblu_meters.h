@@ -49,11 +49,14 @@
 
 typedef unsigned char T_BOOL;       //1 octets
 
-#define GDO2 2 //header  13
+//#define GDO2 2 //header  13
+#define GDO2 3 // GPIO22
 #define GDO1_MISO 13
-#define GDO0 0 //header  11 
+//#define GDO0 0 //header  11 
+#define GDO0 6 // GPIO25
 #define MOSI 12
-#define cc1101_CSn 10 ////header  24 
+#define cc1101_CSn 10 // GPIO8 
+
 
 
 #include "utils.c"
