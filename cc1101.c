@@ -195,7 +195,7 @@ void CC1101_CMD(uint8_t spi_instr)
 
 
 
-void echo_cc1101_version(void);
+bool echo_cc1101_version(bool show);
 
 //---------------[CC1100 reset functions "200us"]-----------------------
 void cc1101_reset(void)			// reset defined in cc1100 datasheet §19.1
@@ -221,7 +221,41 @@ void cc1101_reset(void)			// reset defined in cc1100 datasheet §19.1
 
 }
 
-void cc1101_configureRF_0(void)
+void setMHZ(float mhz) 
+{
+    uint8_t freq2 = 0;
+    uint8_t freq1 = 0;
+    uint8_t freq0 = 0;
+
+    //printf("%.4f Mhz : ", mhz);
+    for (bool i = 0; i == 0;) {
+        if (mhz >= 26) {
+            mhz -= 26;
+            freq2 += 1;
+        } else if (mhz >= 0.1015625) {
+            mhz -= 0.1015625;
+            freq1 += 1;
+        } else if (mhz >= 0.00039675) {
+            mhz -= 0.00039675;
+            freq0 += 1;
+        } else { 
+            i = 1; 
+        }
+    }
+    if (freq0 > 255) { 
+        freq1 += 1; 
+        freq0 -= 256; 
+    }
+    
+    printf(" %02X %02X %02X ", freq2, freq1, freq0);
+    
+    halRfWriteReg(FREQ2, freq2);
+    halRfWriteReg(FREQ1, freq1);
+    halRfWriteReg(FREQ0, freq0);
+}
+
+
+void cc1101_configureRF_0(float freq)
 {
 	RF_config_u8=0;
 	//
@@ -238,9 +272,10 @@ void cc1101_configureRF_0(void)
 	halRfWriteReg(PKTCTRL0,0x00);//fix length , no CRC
 	halRfWriteReg(FSCTRL1,0x08); //Frequency Synthesizer Control
 
-	halRfWriteReg(FREQ2,0x10);   //Frequency Control Word, High Byte  Base frequency = 433.82
-	halRfWriteReg(FREQ1,0xAF);   //Frequency Control Word, Middle Byte
-	halRfWriteReg(FREQ0,0x75); //Frequency Control Word, Low Byte la fréquence reel etait 433.790 (centre)
+	setMHZ(freq);
+	//halRfWriteReg(FREQ2,0x10);   //Frequency Control Word, High Byte  Base frequency = 433.82
+	//halRfWriteReg(FREQ1,0xAF);   //Frequency Control Word, Middle Byte
+	//halRfWriteReg(FREQ0,0x75); //Frequency Control Word, Low Byte la fréquence reel etait 433.790 (centre)
 	//halRfWriteReg(FREQ0,0xC1); //Frequency Control Word, Low Byte rasmobo 814 824 (KO) ; minepi 810 820 (OK)
 	//halRfWriteReg(FREQ0,0x9B); //rasmobo 808.5  -16  pour -38
 	//halRfWriteReg(FREQ0,0xB7);   //rasmobo 810 819.5 OK
@@ -273,8 +308,9 @@ void cc1101_configureRF_0(void)
 	SPIWriteBurstReg(PATABLE_ADDR, PA, 8);  
 }
 
-void  cc1101_init(void)
+bool  cc1101_init(float freq, bool show)
 {   
+	bool ret = false;
 	// to use SPI pi@MinePi ~ $ gpio unload spi  then gpio load spi   
 	// sinon pas de MOSI ni pas de CSn , buffer de 4kB
 	if ((wiringPiSPISetup (0, 100000)) < 0)        // channel 0 100khz   min 500khz ds la doc ?
@@ -285,7 +321,9 @@ void  cc1101_init(void)
 	}  
 	cc1101_reset();
 	delay(1); //1ms
-	cc1101_configureRF_0();  
+	ret = echo_cc1101_version(show);
+	cc1101_configureRF_0(freq);  
+	return ret;
 }
 
 int8_t cc1100_rssi_convert2dbm(uint8_t Rssi_dec)
@@ -316,10 +354,16 @@ void cc1101_rec_mode(void)
 	}
 }	
 
-void echo_cc1101_version(void)
+bool echo_cc1101_version(bool show)
 {
-	echo_debug(debug_out,"CC1101 Partnumber: 0x%02X\r\n", halRfReadReg(PARTNUM_ADDR));
-	echo_debug(debug_out,"CC1101 Version != 00 or 0xFF  : 0x%02X\r\n", halRfReadReg(VERSION_ADDR));  // != 00 or 0xFF
+	uint8_t version;
+	//printf("CC1101 Partnumber: 0x%02X  ", halRfReadReg(PARTNUM_ADDR));
+	version = halRfReadReg(VERSION_ADDR);
+	if (show) {
+		printf("CC1101 Version : 0x%02X\r\n", version);  
+	}
+	// != 00 or 0xFF
+	return version>0 && version<255 ;
 }
 
 
@@ -674,6 +718,11 @@ struct tmeter_data get_meter_data(void)
 	delay(30); //50ms de 111111  , mais on a 7+3ms de printf et xxms calculs
 	/*34ms 0101...01  14.25ms 000...000  14ms 1111...11111  582ms de data avec l'index */
 	rxBuffer_size = receive_radian_frame(0x7C,700,rxBuffer,sizeof(rxBuffer));
+
+	sdata.liters = 0;
+	sdata.battery_left = 0;
+	sdata.reads_counter = 0;
+
 	if (rxBuffer_size)
 	{
 		if (debug_out) show_in_hex_array(rxBuffer, rxBuffer_size);
