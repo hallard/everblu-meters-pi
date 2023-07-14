@@ -111,7 +111,8 @@ bool scan_frequency(float _frequency)
     // Got datas ?
     if (meter_data.reads_counter != 0 || meter_data.liters != 0) {
         ret = true;
-        printMeterData(&meter_data, NULL);
+        printf("** OK **\r\n");
+        //printMeterData(&meter_data, NULL);
     } else {
         printf("No answer\r\n");
     }
