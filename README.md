@@ -1,4 +1,4 @@
-# everblu-meters - Water usage data for MQTT
+# everblu-meters-pi - Water usage data for MQTT
 
 Fetch water/gas usage data from Cyble EverBlu meters using RADIAN protocol on 433Mhz. Integrated with MQTT. 
 
@@ -28,7 +28,7 @@ The project runs on Raspberry Pi with an RF transreciver (CC1101). Check the ded
 7. Setup crontab to run it twice a day
 
 
-To run with found frequency (works with default frequency here)
+To run with specific frequency (works with default frequency `433.82` here)
 
 ```shell
 pi@raspberrypi:~/everblu-meters-pi $ ./everblu_meters 433.82
@@ -37,11 +37,13 @@ pi@raspberrypi:~/everblu-meters-pi $ ./everblu_meters 433.82
 ## Troubleshooting
 
 ### Frequency adjustment
-Your transreciver module may be not calibrated correctly, please find working frequency as follow
 
-To scan frequencies
+Your transreciver module may be not calibrated correctly, please find working frequency enabling a scan setting frequency do `0`
+
+To scan frequencies set frequency to 0
+
 ```shell
-./everblu_meters 0 
+pi@raspberrypi:~/everblu-meters-pi $ ./everblu_meters 0
 ```
 
 ### Business hours
@@ -70,6 +72,8 @@ Please ignore the leading 0, provide serial in configuration without it.
 ### Save power
 
 The meter has internal battery, which should last for 10 years when queried once a day. 
+
+According Water manager here they need to change about 10/15 on each measure session, my previous one from 2017 was not working anymore, now they came and put a new one.
 
 
 ## Origin and license
