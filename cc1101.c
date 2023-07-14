@@ -247,7 +247,7 @@ void setMHZ(float mhz)
         freq0 -= 256; 
     }
     
-    printf(" %02X %02X %02X ", freq2, freq1, freq0);
+    //printf(" %02X %02X %02X ", freq2, freq1, freq0);
     
     halRfWriteReg(FREQ2, freq2);
     halRfWriteReg(FREQ1, freq1);
