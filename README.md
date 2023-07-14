@@ -13,7 +13,9 @@ I added some changes to the original firmware to work with my custom [shield][7]
 
 ![With CC1101 Custom Mini Shield](pictures/cc1101-pi-spring.jpg)
 
-The project runs on Raspberry Pi with an RF transreciver (CC1101). Check the dedicated [repo][7]
+The project runs on Raspberry Pi with an RF transreciver (CC1101). 
+
+You can check my dedicated [repo][7] for the already made hardware or look at the original [repo][5] if you want to build your own.
 
 
 ## Configuration
