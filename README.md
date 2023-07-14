@@ -40,7 +40,7 @@ pi@raspberrypi:~/everblu-meters-pi $ ./everblu_meters 433.82
 
 ### Frequency adjustment
 
-Your transreciver module may be not calibrated correctly, please find working frequency enabling a scan setting frequency do `0`
+Your transreciver module may be not calibrated correctly, please find working frequency enabling a scan setting frequency to `0`
 
 To scan frequencies set frequency to 0
 
@@ -80,7 +80,7 @@ According Water manager here they need to change about 10/15 on each measure ses
 
 ## Origin and license
 
-This code is based on code from http://www.lamaisonsimon.fr/wiki/doku.php?id=maison2:compteur_d_eau:compteur_d_eau 
+This code is based on code from [lamaisonsimon][4]
 
 
 The license is unknown, citing one of the authors (fred):
