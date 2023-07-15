@@ -22,8 +22,10 @@
 #include "cc1101.c"
 
 struct tmeter_data meter_data;
+struct mosquitto *mosq = NULL;
 char meter_id[32];
 char mqtt_topic[64];
+float f_min, f_max ; // Scan results
 
 void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *message)
 {
@@ -106,30 +108,76 @@ void IO_init(void)
     #endif
 }
 
-// Start a frequency scan, this one start at the center estimated
-// frequency to find quicker the correct working frequencies
-bool scan_frequency(float _frequency) 
+// test a read on specified frequency
+bool test_frequency(float _frequency) 
 {
-    bool ret = false;
+    #ifdef LED_BLU
+    digitalWrite(LED_BLU, HIGH);
+    delay(250);
+    digitalWrite(LED_BLU, LOW);
+    #endif
     printf("Test frequency : %.4fMHz => ", _frequency);
     fflush(stdout);
-    cc1101_init(_frequency, false);
+    cc1101_init(_frequency, 0, false);
     meter_data = get_meter_data();
     // Got datas ?
-    if (meter_data.reads_counter != 0 || meter_data.liters != 0) {
-        ret = true;
-        printf("** OK **\r\n");
+    if (meter_data.ok) {
+        printf("** OK **\n");
         //printMeterData(&meter_data, NULL);
+        // check working boundaries
+        if (_frequency > f_max) {
+            f_max = _frequency;
+        }
+        if (_frequency < f_min) {
+            f_min = _frequency;
+        }
     } else {
-        printf("No answer\r\n");
+        printf("No answer\n");
     }
-    return ret;
+
+    char buff[256];
+    time_t timestamp = time( NULL );
+    struct tm * timeInfos = localtime( & timestamp );
+    sprintf(mqtt_topic, MQTT_TOPIC "%s/scanning", meter_id);
+    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"result\":%d ",  asctime(timeInfos), _frequency, meter_data.ok );
+    mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
+
+    return meter_data.ok;
+}
+
+// test a read on specified frequency using CC1101 register settings
+bool test_frequency_register(uint16_t reg) 
+{
+    #ifdef LED_BLU
+    digitalWrite(LED_BLU, HIGH);
+    delay(250);
+    digitalWrite(LED_BLU, LOW);
+    #endif
+    printf("Test register : %04X => ", reg);
+    fflush(stdout);
+    cc1101_init(0.0f, reg, false);
+    meter_data = get_meter_data();
+    // Got datas ?
+    if (meter_data.ok) {
+        printf("** OK **\n");
+    } else {
+        printf("No answer\n");
+    }
+
+    char buff[256];
+    time_t timestamp = time( NULL );
+    struct tm * timeInfos = localtime( & timestamp );
+    sprintf(mqtt_topic, MQTT_TOPIC "%s/scanning", meter_id);
+    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"register\":\"%04X\", \"result\":%d ",  asctime(timeInfos), 0.0f, reg, meter_data.ok );
+    mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
+
+    return meter_data.ok;
 }
 
 void usage() {
     printf("usage: ./everblu_meters [frequency]\n");
     printf("set frequency between 432 and 435\n");
-    printf("to start a frequency scan et it to 0\n");
+    printf("set frequency to 0 to start a scan\n");
     printf("examples:\n");
     printf("  everblu_meters 433.82\n");
     printf("  everblu_meters 0\n");
@@ -138,10 +186,8 @@ void usage() {
 
 int main(int argc, char *argv[])
 {
-	struct mosquitto *mosq = NULL;
 	char buff[MQTT_MSG_MAX_SIZE];
-
-	float frequency ;
+	float frequency;
 
     if ( argc != 2 ) {
         usage();
@@ -156,7 +202,7 @@ int main(int argc, char *argv[])
 	sprintf(meter_id, "cyble-%02d-%07d-pi", METER_YEAR, METER_SERIAL);
 	IO_init();
 
-	if (!cc1101_init(433.8200f, true)) {
+	if (!cc1101_init(433.8200f, 0, true)) {
 		printf("CC1101 Not found, check wiring!\n");
         exit(1);
 	}
@@ -196,21 +242,37 @@ int main(int argc, char *argv[])
 
     printf("Connected to MQTT broker\r\n");
 
+    // Scan all frequencies
     if ( frequency == 0.0f ) {
-        // Scan al frequencies and blink Blue Led
+
         frequency = 433.8200f;
+        f_min = 450;
+        f_max = 400;
         float fdev = 0.0000f;
+        float scanned ;
+
         while (frequency >= 433.7600f && frequency <= 433.8900f ) {
-            // Blink blue when scanning
-            #ifdef LED_BLU
-            digitalWrite(LED_BLU, HIGH);
-            delay(250);
-            digitalWrite(LED_BLU, LOW);
-            #endif
-            scan_frequency(433.8200f + fdev);
-            scan_frequency(433.8200f - fdev);
+            scanned = 433.8200f + fdev;
+            test_frequency(scanned);
+            scanned = 433.8200f - fdev;
+            test_frequency(scanned);
             fdev = fdev + 0.0005f;
         }
+
+        // Found frequency Range, setup in the middle
+        if (f_min<450 && f_max>400) {
+            printf( "Working from %.4fMHz to %.4fMhz\n", f_min, f_max);
+            frequency = 433.82f + ((f_max - f_min) / 2);
+            printf( "Please use %.4f as frequency\n", frequency);
+        } else {
+            printf( "No working frequency found!\n");
+            frequency = 0.0f;
+        }
+        time_t timestamp = time( NULL );
+        struct tm * timeInfos = localtime( & timestamp );
+        sprintf(mqtt_topic, MQTT_TOPIC "%s/scan", meter_id);
+        sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"min\":\"%.4f\", \"max\":\"%.4f\" ",  asctime(timeInfos), frequency,f_min, f_max );
+        mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
     } else {
         time_t timestamp = time( NULL );
@@ -221,7 +283,7 @@ int main(int argc, char *argv[])
         #ifdef LED_RED
         digitalWrite(LED_RED, HIGH);
         #endif
-        cc1101_init(frequency, false);
+        cc1101_init(frequency, 0, false);
         meter_data = get_meter_data();
         #ifdef LED_RED
         digitalWrite(LED_RED, LOW);
