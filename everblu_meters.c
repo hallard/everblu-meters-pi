@@ -22,13 +22,14 @@
 #include "cc1101.c"
 
 struct tmeter_data meter_data;
+char meter_id[32];
+char mqtt_topic[64];
 
 void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *message)
 {
-
-	if(message->payloadlen){
-		printf("%s %s", message->topic, (char *)message->payload);
-	}else{
+	if ( message->payloadlen ) {
+		printf("MQTT : Received %s %s", message->topic, (char *)message->payload);
+	} else {
 		//printf("%s (null)\n", message->topic);
 	}
 	fflush(stdout);
@@ -36,19 +37,22 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
 
 void my_connect_callback(struct mosquitto *mosq, void *userdata, int result)
 {
-	if(!result){
+    char full_topic[128] = MQTT_TOPIC;
+    sprintf(full_topic, MQTT_TOPIC "/%s/WaterUsage", meter_id);
+
+	if ( !result ) {
 		/* Subscribe to broker information topics on successful connect. */
-		mosquitto_subscribe(mosq, NULL, "WaterUsage ", 2);
-	}else{
-		fprintf(stderr, "Connect failed\n");
+		mosquitto_subscribe(mosq, NULL, full_topic, 2);
+	} else {
+		fprintf(stderr, "MQTT : Subscribe to %s failed\n", full_topic);
 	}
 }
 
 void my_subscribe_callback(struct mosquitto *mosq, void *userdata, int mid, int qos_count, const int *granted_qos)
 {
 	int i;
-	printf("Subscribed (mid: %d): %d", mid, granted_qos[0]);
-	for(i=1; i<qos_count; i++){
+	printf("MQTT : Subscribed OK (mid: %d): %d", mid, granted_qos[0]);
+	for ( i=1 ; i < qos_count ; i++ ) {
 		printf(", %d", granted_qos[i]);
 	}
 	printf("\n");
@@ -57,14 +61,14 @@ void my_subscribe_callback(struct mosquitto *mosq, void *userdata, int mid, int 
 void my_log_callback(struct mosquitto *mosq, void *userdata, int level, const char *str)
 {
 	/* Pring all log messages regardless of level. */
-	printf("%s\n", str);
-
+	printf("MQTT Log : %s\n", str);
 }
 
 void printMeterData(struct tmeter_data * data , char * json_data)
 {
     time_t rawtime;
     struct tm * timeinfo;
+    time_t ts = time (NULL);
     time ( &rawtime );
     timeinfo = localtime ( &rawtime );
 
@@ -74,10 +78,11 @@ void printMeterData(struct tmeter_data * data , char * json_data)
     printf("Working hours : from %02dH to %02dH\r\n", data->time_start, data->time_end);
     printf("Local Time    : %s\r\n", asctime(timeinfo));
 
+    // Format this to JSON ?
     if (json_data) {
-        sprintf(json_data, "{ \"liters\":%d, \"battery\":%d, \"read\":%d, \"hours\":\"%02d-%02d\", \"time\":\"%s\" }", 
+        sprintf(json_data, "{ \"liters\":%d, \"battery\":%d, \"read\":%d, \"hours\":\"%02d-%02d\", \"date\":\"%s\", \"ts\":%ld }", 
                 data->liters, data->battery_left, data->reads_counter, 
-                data->time_start, data->time_end, asctime (timeinfo) );
+                data->time_start, data->time_end, asctime(timeinfo), ts );
     }
 }
 
@@ -91,7 +96,7 @@ void IO_init(void)
     digitalWrite(LED_RED, LOW);
     #endif
     #ifdef LED_GRN
-    // Light green LED
+    // Light green LED on start
 	pinMode (LED_GRN, OUTPUT);
     digitalWrite(LED_GRN, HIGH);
     #endif
@@ -101,6 +106,8 @@ void IO_init(void)
     #endif
 }
 
+// Start a frequency scan, this one start at the center estimated
+// frequency to find quicker the correct working frequencies
 bool scan_frequency(float _frequency) 
 {
     bool ret = false;
@@ -119,26 +126,31 @@ bool scan_frequency(float _frequency)
     return ret;
 }
 
+void usage() {
+    printf("usage: ./everblu_meters [frequency]\n");
+    printf("set frequency between 432 and 435\n");
+    printf("to start a frequency scan et it to 0\n");
+    printf("examples:\n");
+    printf("  everblu_meters 433.82\n");
+    printf("  everblu_meters 0\n");
+    exit(1);
+}
+
 int main(int argc, char *argv[])
 {
 	struct mosquitto *mosq = NULL;
 	char buff[MQTT_MSG_MAX_SIZE];
-	char meter_id[32];
-	char mqtt_topic[64];
+
 	float frequency ;
 
     if ( argc != 2 ) {
-        printf("usage: ./everblu_meters [frequency]\n");
-        printf("./everblu_meters 433.82\n");
-        printf("use 0 to start a frequency scan\n");
-        printf("./everblu_meters 0\n");
-        exit(1);
+        usage();
     }
 
     frequency = atof(argv[1]);
     if ( frequency !=0 && (frequency < 432.0f || frequency > 435.0f) ) {
-        printf("wrong frequency %.4f\n", frequency);
-        exit(1);
+        printf("wrong frequency %.4f\n\n", frequency);
+        usage();
     }
 
 	sprintf(meter_id, "cyble-%02d-%07d-pi", METER_YEAR, METER_SERIAL);
@@ -150,6 +162,7 @@ int main(int argc, char *argv[])
 	}
 
     printf("CC1101 found OK!\n");
+    printf("Base MQTT topic is now " MQTT_TOPIC "%s\n", meter_id);
 
 	mosquitto_lib_init();
 	mosq = mosquitto_new(NULL, true, NULL);
@@ -159,29 +172,31 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	
-	//Set callback functions
-	mosquitto_log_callback_set(mosq, my_log_callback);
+	// Set callback functions
+    // Enable this one to get MQTT logs
+	//mosquitto_log_callback_set(mosq, my_log_callback);
+
 	mosquitto_connect_callback_set(mosq, my_connect_callback);
 	mosquitto_message_callback_set(mosq, my_message_callback);
 	mosquitto_subscribe_callback_set(mosq, my_subscribe_callback);
 
 	mosquitto_username_pw_set(mosq, MQTT_USER, MQTT_PASS);
 
-	//Connect to MQTT server
-	if(mosquitto_connect(mosq, MQTT_HOST, MQTT_PORT, MQTT_KEEP_ALIVE)){
-		fprintf(stderr, "ERROR: Unable to connect to MQTT broker.\n");
+	// Connect to MQTT server
+	if( mosquitto_connect(mosq, MQTT_HOST, MQTT_PORT, MQTT_KEEP_ALIVE) ){
+		fprintf(stderr, "MQTT : Unable to connect to MQTT broker.\n");
 		return 1;
 	}
-	//Start a thread, and call mosquitto? Loop() continuously in the thread to process network information
+	// Start a thread, and call mosquitto? Loop() continuously in the thread to process network information
 	int loop = mosquitto_loop_start(mosq);
-	if(loop != MOSQ_ERR_SUCCESS)
-	{
-		fprintf(stderr, "ERROR: failed to create mosquitto loop");
+	if( loop != MOSQ_ERR_SUCCESS ) {
+		fprintf(stderr, "MQTT : Failed to create mosquitto loop");
 		return 1;
 	}
 
-    printf("\r\n");
-    if (frequency == 0.0f) {
+    printf("Connected to MQTT broker\r\n");
+
+    if ( frequency == 0.0f ) {
         // Scan al frequencies and blink Blue Led
         frequency = 433.8200f;
         float fdev = 0.0000f;
@@ -198,6 +213,10 @@ int main(int argc, char *argv[])
         }
 
     } else {
+        time_t timestamp = time( NULL );
+        struct tm * timeInfos = localtime( & timestamp );
+        char ts[64];
+        sprintf(ts, "%s", asctime( timeInfos ) );
 
         #ifdef LED_RED
         digitalWrite(LED_RED, HIGH);
@@ -207,9 +226,18 @@ int main(int argc, char *argv[])
         #ifdef LED_RED
         digitalWrite(LED_RED, LOW);
         #endif
-    
+
+        // always publish date and timestmap
+        sprintf(mqtt_topic, MQTT_TOPIC "%s/ts", meter_id);
+        sprintf(buff, "%ld", timestamp );
+        mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
+
+        sprintf(mqtt_topic, MQTT_TOPIC "%s/date", meter_id);
+        sprintf(buff, "%s",  asctime( timeInfos ) );
+        mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
+
         // Got datas ?
-        if (meter_data.reads_counter != 0 || meter_data.liters != 0) {
+        if ( meter_data.ok ) {
             printMeterData(&meter_data, buff);
             sprintf(mqtt_topic, MQTT_TOPIC "%s/json", meter_id);
             mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
@@ -226,8 +254,13 @@ int main(int argc, char *argv[])
             sprintf(buff, "%d", meter_data.reads_counter );
             mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
-            delay(1000);
+        } else {
+            printf("No data, are you in business hours?\n");
+            sprintf(mqtt_topic, MQTT_TOPIC "%s/error", meter_id);
+            sprintf(buff, "{ \"date\":\"%s\", \"type\":\"No Data\" ",  asctime( timeInfos ) );
+            mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
         }
+        delay(1000);
     }
 
 	mosquitto_destroy(mosq);
