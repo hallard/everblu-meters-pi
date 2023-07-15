@@ -235,8 +235,21 @@ void setMHZ(float mhz)
     halRfWriteReg(FREQ0, freq0);
 }
 
+void setFREQxRegister(uint16_t freg) 
+{
+    // value for 433.82MHz is 0x10AF75
+    // we scan only for last 2 bytes
+    uint8_t freq2 = 0x10;
+    uint8_t freq1 = (freg >> 8) & 0xFF ;
+    uint8_t freq0 = freg & 0xFF ;
+    
+    //printf(" %02X %02X %02X ", freq2, freq1, freq0);
+    halRfWriteReg(FREQ2, freq2);
+    halRfWriteReg(FREQ1, freq1);
+    halRfWriteReg(FREQ0, freq0);
+}
 
-void cc1101_configureRF_0(float freq)
+void cc1101_configureRF_0(float freq, uint16_t freg)
 {
 	RF_config_u8=0;
 	//
@@ -253,7 +266,14 @@ void cc1101_configureRF_0(float freq)
 	halRfWriteReg(PKTCTRL0,0x00);//fix length , no CRC
 	halRfWriteReg(FSCTRL1,0x08); //Frequency Synthesizer Control
 
-	setMHZ(freq);
+    if ( freq != 0.0f ) {
+    	setMHZ(freq);
+    } else if ( freg != 0x0000 ) {
+    	setFREQxRegister(freg);
+    } else {
+        fprintf(stderr, "Wrong frequency parameter, set to 433.82MHz\n");
+       	setMHZ(433.8200f);
+    }
 	//halRfWriteReg(FREQ2,0x10);   //Frequency Control Word, High Byte  Base frequency = 433.82
 	//halRfWriteReg(FREQ1,0xAF);   //Frequency Control Word, Middle Byte
 	//halRfWriteReg(FREQ0,0x75); //Frequency Control Word, Low Byte la fréquence reel etait 433.790 (centre)
@@ -289,7 +309,7 @@ void cc1101_configureRF_0(float freq)
 	SPIWriteBurstReg(PATABLE_ADDR, PA, 8);  
 }
 
-bool  cc1101_init(float freq, bool show)
+bool  cc1101_init(float freq, uint16_t freg, bool show)
 {   
 	bool ret = false;
 	// to use SPI pi@MinePi ~ $ gpio unload spi  then gpio load spi   
@@ -303,7 +323,7 @@ bool  cc1101_init(float freq, bool show)
 	cc1101_reset();
 	delay(1); //1ms
 	ret = echo_cc1101_version(show);
-	cc1101_configureRF_0(freq);  
+	cc1101_configureRF_0(freq, freg);  
 	return ret;
 }
 
