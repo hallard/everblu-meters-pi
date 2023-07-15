@@ -66,25 +66,34 @@ void my_log_callback(struct mosquitto *mosq, void *userdata, int level, const ch
 	printf("MQTT Log : %s\n", str);
 }
 
-void printMeterData(struct tmeter_data * data , char * json_data)
+// To be reworked for more robust code
+char * getDate() 
 {
     time_t rawtime;
     struct tm * timeinfo;
-    time_t ts = time (NULL);
     time ( &rawtime );
     timeinfo = localtime ( &rawtime );
+    char * str = asctime(timeinfo) ;
+    // remove ending \n
+    str[strlen(str)-1] ='\0';
+    return str;
+}
 
+
+void printMeterData(struct tmeter_data * data , char * json_data)
+{
+    time_t ts = time (NULL);
     printf("Consumption   : %d Liters\r\n", data->liters);
     printf("Battery left  : %d Months\r\n", data->battery_left);
     printf("Read counter  : %d times\r\n", data->reads_counter);
     printf("Working hours : from %02dH to %02dH\r\n", data->time_start, data->time_end);
-    printf("Local Time    : %s\r\n", asctime(timeinfo));
+    printf("Local Time    : %s\r\n", getDate());
 
     // Format this to JSON ?
     if (json_data) {
         sprintf(json_data, "{ \"liters\":%d, \"battery\":%d, \"read\":%d, \"hours\":\"%02d-%02d\", \"date\":\"%s\", \"ts\":%ld }", 
                 data->liters, data->battery_left, data->reads_counter, 
-                data->time_start, data->time_end, asctime(timeinfo), ts );
+                data->time_start, data->time_end, getDate(), ts );
     }
 }
 
@@ -136,10 +145,8 @@ bool test_frequency(float _frequency)
     }
 
     char buff[256];
-    time_t timestamp = time( NULL );
-    struct tm * timeInfos = localtime( & timestamp );
     sprintf(mqtt_topic, MQTT_TOPIC "%s/scanning", meter_id);
-    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"result\":%d ",  asctime(timeInfos), _frequency, meter_data.ok );
+    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"result\":%d }",  getDate(), _frequency, meter_data.ok );
     mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
     return meter_data.ok;
@@ -165,10 +172,8 @@ bool test_frequency_register(uint16_t reg)
     }
 
     char buff[256];
-    time_t timestamp = time( NULL );
-    struct tm * timeInfos = localtime( & timestamp );
     sprintf(mqtt_topic, MQTT_TOPIC "%s/scanning", meter_id);
-    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"register\":\"%04X\", \"result\":%d ",  asctime(timeInfos), 0.0f, reg, meter_data.ok );
+    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"register\":\"%04X\", \"result\":%d }",  getDate(), 0.0f, reg, meter_data.ok );
     mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
     return meter_data.ok;
@@ -245,40 +250,41 @@ int main(int argc, char *argv[])
     // Scan all frequencies
     if ( frequency == 0.0f ) {
 
-        frequency = 433.8200f;
+        frequency = 433.82f;
         f_min = 450;
         f_max = 400;
-        float fdev = 0.0000f;
-        float scanned ;
+        float fdev = 0.0f;
+        float scanned = frequency;
 
-        while (frequency >= 433.7600f && frequency <= 433.8900f ) {
-            scanned = 433.8200f + fdev;
+        // Scan from 433.76 to 433.89 thru 0.0005 step
+        while (fdev <  0.005 /*(433.89f-433.82f)*/ ) {
+            scanned = 433.82f + fdev;
             test_frequency(scanned);
-            scanned = 433.8200f - fdev;
+            scanned = 433.82f - fdev;
             test_frequency(scanned);
             fdev = fdev + 0.0005f;
         }
+
+        //time_t timestamp = time( NULL );
+        sprintf(mqtt_topic, MQTT_TOPIC "%s/scan", meter_id);
 
         // Found frequency Range, setup in the middle
         if (f_min<450 && f_max>400) {
             printf( "Working from %.4fMHz to %.4fMhz\n", f_min, f_max);
             frequency = 433.82f + ((f_max - f_min) / 2);
             printf( "Please use %.4f as frequency\n", frequency);
+            sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"min\":\"%.4f\", \"max\":\"%.4f\" } ",  getDate(), frequency,f_min, f_max );
         } else {
             printf( "No working frequency found!\n");
             frequency = 0.0f;
+            sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\" } ",  getDate(), frequency );
         }
-        time_t timestamp = time( NULL );
-        struct tm * timeInfos = localtime( & timestamp );
-        sprintf(mqtt_topic, MQTT_TOPIC "%s/scan", meter_id);
-        sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"min\":\"%.4f\", \"max\":\"%.4f\" ",  asctime(timeInfos), frequency,f_min, f_max );
         mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
     } else {
-        time_t timestamp = time( NULL );
-        struct tm * timeInfos = localtime( & timestamp );
+        //time_t timestamp = time( NULL );
         char ts[64];
-        sprintf(ts, "%s", asctime( timeInfos ) );
+        sprintf(ts, "%s", getDate() );
 
         #ifdef LED_RED
         digitalWrite(LED_RED, HIGH);
@@ -291,11 +297,11 @@ int main(int argc, char *argv[])
 
         // always publish date and timestmap
         sprintf(mqtt_topic, MQTT_TOPIC "%s/ts", meter_id);
-        sprintf(buff, "%ld", timestamp );
+        sprintf(buff, "%ld", time(NULL) );
         mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
         sprintf(mqtt_topic, MQTT_TOPIC "%s/date", meter_id);
-        sprintf(buff, "%s",  asctime( timeInfos ) );
+        sprintf(buff, "%s",  getDate() );
         mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
         // Got datas ?
@@ -312,14 +318,14 @@ int main(int argc, char *argv[])
             sprintf(buff, "%d", meter_data.battery_left );
             mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
-            sprintf(mqtt_topic, MQTT_TOPIC "%s/counter", meter_id);
+            sprintf(mqtt_topic, MQTT_TOPIC "%s/read", meter_id);
             sprintf(buff, "%d", meter_data.reads_counter );
             mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
         } else {
             printf("No data, are you in business hours?\n");
             sprintf(mqtt_topic, MQTT_TOPIC "%s/error", meter_id);
-            sprintf(buff, "{ \"date\":\"%s\", \"type\":\"No Data\" ",  asctime( timeInfos ) );
+            sprintf(buff, "{ \"date\":\"%s\", \"type\":\"No Data\" }",  getDate() );
             mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
         }
         delay(1000);
