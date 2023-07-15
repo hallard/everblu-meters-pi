@@ -1,5 +1,7 @@
 # everblu-meters-pi - Water usage data for MQTT
 
+![With CC1101 Shield on PI Zero](pictures/cc1101-pi-zero.jpg)
+
 Fetch water/gas usage data from Cyble EverBlu meters using RADIAN protocol on 433Mhz. Integrated with MQTT. 
 
 Meters supported:
@@ -11,12 +13,11 @@ I added some changes to the original firmware to work with my custom [shield][7]
 
 ## Hardware
 
-![With CC1101 Custom Mini Shield](pictures/cc1101-pi-spring.jpg)
-
 The project runs on Raspberry Pi with an RF transreciver (CC1101). 
 
-You can check my dedicated [repo][7] for the already made hardware or look at the original [repo][5] if you want to build your own.
+Hardware used is open sourced on my github [cc1101-e07-pi](https://github.com/hallard/cc1101-e07-pi), you can check it out for the already made hardware or look at the original [repo][5] if you want to build your own.
 
+![With CC1101 Custom Mini Shield](pictures/cc1101-pi-antennas.jpg)
 
 ## Configuration
 
@@ -27,7 +28,7 @@ You can check my dedicated [repo][7] for the already made hardware or look at th
 ![Cyble Meter Label](pictures/meter_label.png)
 5. Configure MQTT connection details in `everblu_meters.c`: `MQTT_HOST`, `MQTT_USER`, `MQTT_PASS`
 6. Compile the code with `make`
-7. Setup crontab to run it twice a day
+7. Setup crontab to run it once a day
 
 
 To run with specific frequency (works with default frequency `433.82` here)
@@ -145,7 +146,7 @@ If `frequency` is found it will be the center frequency of the working frequenci
 
 Your transreciver module may be not calibrated correctly, please find working frequency enabling a scan setting frequency to `0`
 
-To scan frequencies set frequency to 0`
+To scan frequencies set frequency to `0`
 
 ```shell
 pi@raspberrypi:~/everblu-meters-pi $ ./everblu_meters 0
@@ -210,9 +211,5 @@ See news and other projects on my [blog][2]
 [5]: https://github.com/neutrinus/everblu-meters
 [6]: https://github.com/hallard/everblu-meters-pi
 [7]: https://github.com/hallard/cc1101-e07-pi
-
-
-
-
 
 
