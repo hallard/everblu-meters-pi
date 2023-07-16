@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <mosquitto.h>
 #include <string.h>
+#include <signal.h>
 
 #include "everblu_meters.h"
 #include "cc1101.c"
@@ -27,6 +28,42 @@ char meter_id[32];
 char mqtt_topic[64];
 float f_min, f_max ; // Scan results
 uint32_t r_min, r_max ; // Scan results
+
+
+void clean_exit(int code) 
+{
+    if (mosq) {
+        mosquitto_destroy(mosq);
+    }
+	mosquitto_lib_cleanup();
+
+    // Clear all LED
+    #ifdef LED_RED
+    digitalWrite(LED_RED, LOW);
+    #endif
+    #ifdef LED_GRN
+    digitalWrite(LED_GRN, LOW);
+    #endif
+    #ifdef LED_BLU
+    digitalWrite(LED_BLU, LOW);
+    #endif
+
+    exit(code);
+}
+
+void signal_handler (int signum)
+{
+  // Does we received CTRL-C ?
+  if ( signum==SIGINT ) {
+    // Indicate we want to quit
+    fprintf(stderr, "\nReceived SIGINT\n");
+    clean_exit(0);
+  } else if ( signum==SIGTERM ) {
+    // Indicate we want to quit
+    fprintf(stderr, "\nReceived SIGTERM\n");
+    clean_exit(0);
+  } 
+}
 
 void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *message)
 {
@@ -201,13 +238,14 @@ void usage() {
     printf("examples:\n");
     printf("  everblu_meters 433.82\n");
     printf("  everblu_meters 0\n");
-    exit(1);
+    clean_exit(1);
 }
 
 int main(int argc, char *argv[])
 {
 	char buff[MQTT_MSG_MAX_SIZE];
-	float frequency;
+    float frequency;
+    struct sigaction sa;
 
     if ( argc != 2 ) {
         usage();
@@ -224,11 +262,18 @@ int main(int argc, char *argv[])
 
 	if (!cc1101_init(433.8200f, 0, true)) {
 		printf("CC1101 Not found, check wiring!\n");
-        exit(1);
+        clean_exit(1);
 	}
 
     printf("CC1101 found OK!\n");
     printf("Base MQTT topic is now " MQTT_TOPIC "%s\n", meter_id);
+
+    // Set up the structure to specify the exit action.
+    sa.sa_handler = signal_handler;
+    sa.sa_flags = SA_RESTART;
+    sigfillset(&sa.sa_mask);
+    sigaction (SIGTERM, &sa, NULL);
+    sigaction (SIGINT, &sa, NULL); 
 
 	mosquitto_lib_init();
 	mosq = mosquitto_new(NULL, true, NULL);
@@ -378,19 +423,6 @@ int main(int argc, char *argv[])
         delay(1000);
     }
 
-	mosquitto_destroy(mosq);
-	mosquitto_lib_cleanup();
-
-    // Clear all LED
-    #ifdef LED_RED
-    digitalWrite(LED_RED, LOW);
-    #endif
-    #ifdef LED_GRN
-    digitalWrite(LED_GRN, LOW);
-    #endif
-    #ifdef LED_BLU
-    digitalWrite(LED_BLU, LOW);
-    #endif
-
+    clean_exit(0);
 	return 0;
 }
