@@ -9,45 +9,25 @@
 #include "pthread.h"
 #include "stdint.h"
 #include "string.h"
+#include <time.h>
+#include <unistd.h>    // pour sleep
+#include <termios.h>
 
 #include "wiringPi.h"
 
-#ifdef __unix__
-# include <time.h>
-# include <unistd.h>    // pour sleep
-# include <termios.h>
-//# include <ncurses.h>   // pour getch mais fonctionne bizarement
-	char getch(){
-		/*#include <unistd.h>   //_getch*/
-		/*#include <termios.h>  //_getch*/
-		char buf=0;
-		struct termios old={0};
-		fflush(stdout);
-		if(tcgetattr(0, &old)<0)
-        perror("tcsetattr()");
-		old.c_lflag&=~ICANON;
-		old.c_lflag&=~ECHO;
-		old.c_cc[VMIN]=1;
-		old.c_cc[VTIME]=0;
-		if(tcsetattr(0, TCSANOW, &old)<0)
-        perror("tcsetattr ICANON");
-		if(read(0,&buf,1)<0)
-        perror("read()");
-		old.c_lflag|=ICANON;
-		old.c_lflag|=ECHO;
-		if(tcsetattr(0, TCSADRAIN, &old)<0)
-        perror ("tcsetattr ~ICANON");
-		printf("%c",buf);
-		return buf;
-	}
+#define METER_YEAR      22
+#define METER_SERIAL    828979
 
-#elif defined _WIN32
-# include <windows.h>
-# include <conio.h> // pour getch
-#define sleep(x) Sleep(1000 * x)
-#endif
+#define MQTT_HOST   "192.168.1.8"
+#define MQTT_PORT   1883
+#define MQTT_USER   ""
+#define MQTT_PASS   ""
+#define MQTT_TOPIC  "everblu/"
+#define MQTT_KEEP_ALIVE     300
+#define MQTT_MSG_MAX_SIZE   512
 
-typedef unsigned char T_BOOL;       //1 octets
+#define REG_DEFAULT 	0x10AF75 // CC1101 register values for 433.82MHz
+#define REG_SCAN_LOOP	     128 // Allow up and dow 128 to REG_DEFAULT while scanning 
 
 #define GDO0        6 // GPIO25
 #define GDO2        3 // GPIO22
