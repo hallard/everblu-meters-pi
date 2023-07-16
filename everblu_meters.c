@@ -1,18 +1,6 @@
  /*  the radian_trx SW shall not be distributed  nor used for commercial product*/
  /*  it is exposed just to demonstrate CC1101 capability to reader water meter indexes */
 
-#define METER_YEAR      22
-#define METER_SERIAL    828979
-
-#define MQTT_HOST   "192.168.1.8"
-#define MQTT_PORT   1883
-#define MQTT_USER   ""
-#define MQTT_PASS   ""
-#define MQTT_TOPIC  "everblu/"
-#define MQTT_KEEP_ALIVE     300
-#define MQTT_MSG_MAX_SIZE   512
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <mosquitto.h>
@@ -104,20 +92,6 @@ void my_log_callback(struct mosquitto *mosq, void *userdata, int level, const ch
 	printf("MQTT Log : %s\n", str);
 }
 
-// To be reworked for more robust code
-char * getDate() 
-{
-    time_t rawtime;
-    struct tm * timeinfo;
-    time ( &rawtime );
-    timeinfo = localtime ( &rawtime );
-    char * str = asctime(timeinfo) ;
-    // remove ending \n
-    str[strlen(str)-1] ='\0';
-    return str;
-}
-
-
 void printMeterData(struct tmeter_data * data , char * json_data)
 {
     time_t ts = time (NULL);
@@ -126,12 +100,13 @@ void printMeterData(struct tmeter_data * data , char * json_data)
     printf("Read counter  : %d times\r\n", data->reads_counter);
     printf("Working hours : from %02dH to %02dH\r\n", data->time_start, data->time_end);
     printf("Local Time    : %s\r\n", getDate());
+    printf("RSSI  /  LQI  : %ddBm  /  %d\r\n", data->rssi, data->lqi);
 
     // Format this to JSON ?
     if (json_data) {
-        sprintf(json_data, "{ \"liters\":%d, \"battery\":%d, \"read\":%d, \"hours\":\"%02d-%02d\", \"date\":\"%s\", \"ts\":%ld }", 
+        sprintf(json_data, "{ \"liters\":%d, \"battery\":%d, \"read\":%d, \"hours\":\"%02d-%02d\", \"rssi\":%d, \"lqi\":%d, \"date\":\"%s\", \"ts\":%ld }", 
                 data->liters, data->battery_left, data->reads_counter, 
-                data->time_start, data->time_end, getDate(), ts );
+                data->time_start, data->time_end, data->rssi, data->lqi, getDate(), ts );
     }
 }
 
@@ -155,47 +130,14 @@ void IO_init(void)
     #endif
 }
 
-// test a read on specified frequency
-bool test_frequency(float _frequency) 
-{
-    #ifdef LED_GRN
-    digitalWrite(LED_GRN, HIGH);
-    delay(250);
-    digitalWrite(LED_GRN, LOW);
-    #endif
-    printf("Test frequency : %.4fMHz => ", _frequency);
-    fflush(stdout);
-    cc1101_init(_frequency, 0, false);
-    meter_data = get_meter_data();
-    // Got datas ?
-    if (meter_data.ok) {
-        printf("** OK **\n");
-        //printMeterData(&meter_data, NULL);
-        // check working boundaries
-        if (_frequency > f_max) {
-            f_max = _frequency;
-        }
-        if (_frequency < f_min) {
-            f_min = _frequency;
-        }
-    } else {
-        printf("No answer\n");
-    }
-
-    char buff[256];
-    sprintf(mqtt_topic, MQTT_TOPIC "%s/scanning", meter_id);
-    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"result\":%d }",  getDate(), _frequency, meter_data.ok );
-    mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
-
-    return meter_data.ok;
-}
-
 // test a read on specified frequency using CC1101 register settings
 bool test_frequency_register(uint32_t reg)  
 {
-    // Skip only 3 bytes
+    char buff[256];
+
+    // keep only 3 bytes
     reg &= 0xFFFFFF;
-    float _frequency = (26000000.0f/65536.0f) * (float) reg / 1000000.0f;
+    float _frequency = (26.0f/65536.0f) * (float) reg ;
 
     #ifdef LED_GRN
     digitalWrite(LED_GRN, HIGH);
@@ -215,7 +157,7 @@ bool test_frequency_register(uint32_t reg)
     // Got datas ?
     if (meter_data.ok) {
         printf("** OK! **");
-        // check working boundaries
+        // check and adjust working boundaries
         if (_frequency > f_max) {
             f_max = _frequency;
             r_max = reg;
@@ -224,18 +166,20 @@ bool test_frequency_register(uint32_t reg)
             f_min = _frequency;
             r_min = reg;
         }
-
     } else {
         printf("No answer");
     }
-    if (r_min<(0x10AF75+128) && r_max>(0x10AF75-128)) {
+
+    // Found working boudaries?
+    if (r_min<(REG_DEFAULT+REG_SCAN_LOOP) && r_max>(REG_DEFAULT-REG_SCAN_LOOP)) {
         printf("    %.4f < Works < %.4f ", f_min, f_max);
+        printf("    RSSI:%ddBm LQI:%d ", meter_data.rssi, meter_data.lqi);
     }
     printf("\n");
 
-    char buff[256];
     sprintf(mqtt_topic, MQTT_TOPIC "%s/scanning", meter_id);
-    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"register\":\"0x%06X\", \"result\":%d }",  getDate(), _frequency, reg, meter_data.ok );
+    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"register\":\"0x%06X\", \"rssi\":%d, \"lqi\":%d, \"result\":%d }", 
+                        getDate(), _frequency, reg, meter_data.rssi, meter_data.lqi, meter_data.reads_counter );
     mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
     return meter_data.ok;
@@ -260,17 +204,18 @@ int main(int argc, char *argv[])
     if ( argc != 2 ) {
         usage();
     }
-
     frequency = atof(argv[1]);
     if ( frequency !=0 && (frequency < 432.0f || frequency > 435.0f) ) {
         printf("wrong frequency %.4f\n\n", frequency);
         usage();
     }
-
 	sprintf(meter_id, "cyble-%02d-%07d-pi", METER_YEAR, METER_SERIAL);
+
+    // SPI and LED init
 	IO_init();
 
-	if (!cc1101_init(433.8200f, 0, true)) {
+    // Check CC1101 with default frequency
+	if ( !cc1101_init(0.0f, REG_DEFAULT, true) ) {
 		printf("CC1101 Not found, check wiring!\n");
         clean_exit(1);
 	}
@@ -285,18 +230,18 @@ int main(int argc, char *argv[])
     sigaction (SIGTERM, &sa, NULL);
     sigaction (SIGINT, &sa, NULL); 
 
+    // Init MQTT
 	mosquitto_lib_init();
 	mosq = mosquitto_new(NULL, true, NULL);
-	if(!mosq){
+	if ( !mosq ) {
 		fprintf(stderr, "ERROR: Create MQTT client failed..\n");
 		mosquitto_lib_cleanup();
-		return 1;
+        clean_exit(1);
 	}
 	
 	// Set callback functions
     // Enable this one to get MQTT logs
 	//mosquitto_log_callback_set(mosq, my_log_callback);
-
 	mosquitto_connect_callback_set(mosq, my_connect_callback);
 	mosquitto_message_callback_set(mosq, my_message_callback);
 	mosquitto_subscribe_callback_set(mosq, my_subscribe_callback);
@@ -304,84 +249,60 @@ int main(int argc, char *argv[])
 	mosquitto_username_pw_set(mosq, MQTT_USER, MQTT_PASS);
 
 	// Connect to MQTT server
-	if( mosquitto_connect(mosq, MQTT_HOST, MQTT_PORT, MQTT_KEEP_ALIVE) ){
+	if ( mosquitto_connect(mosq, MQTT_HOST, MQTT_PORT, MQTT_KEEP_ALIVE) ) {
 		fprintf(stderr, "MQTT : Unable to connect to MQTT broker.\n");
-		return 1;
+		clean_exit(1);
 	}
 	// Start a thread, and call mosquitto? Loop() continuously in the thread to process network information
-	int loop = mosquitto_loop_start(mosq);
-	if( loop != MOSQ_ERR_SUCCESS ) {
-		fprintf(stderr, "MQTT : Failed to create mosquitto loop");
-		return 1;
+	if ( mosquitto_loop_start(mosq) != MOSQ_ERR_SUCCESS ) {
+		fprintf(stderr, "MQTT : Failed to create mosquitto loop\n");
+		clean_exit(1);
 	}
 
-    printf("Connected to MQTT broker\r\n");
+    printf("Connected to MQTT broker (almost)\n");
 
     // Scan all frequencies
     if ( frequency == 0.0f ) {
-        /*
-        frequency = 433.82f;
-        f_min = 450;
-        f_max = 400;
-        float fdev = 0.0f;
-        float scanned = frequency;
-        // Scan from 433.76 to 433.89 thru 0.0005 step
-        // value for 433.82MHz is 0x10AF75
-        // we scan only for last 2 bytes
-        while (fdev <  (433.89f-433.82f) ) {
-            scanned = 433.82f + fdev;
-            test_frequency(scanned);
-            scanned = 433.82f - fdev;
-            test_frequency(scanned);
-            fdev = fdev + 0.0005f;
-        }
-        */
-
-        // value for 433.82MHz is 0x10AF75
-        uint32_t reg = 0x10AF75;
+        // value for 433.82MHz is REG_DEFAULT => 0x10AF75
+        uint32_t reg = REG_DEFAULT;
         uint32_t scanned = reg;
         uint32_t index = 0;
-        r_min = reg + 128;
-        r_max = reg - 128;
-        f_min = 450;
-        f_max = 400;
+        r_min = reg + REG_SCAN_LOOP;
+        r_max = reg - REG_SCAN_LOOP;
+        f_min = 450; // Just to be sure out of bounds
+        f_max = 400; // Just to be sure out of bounds
+
         // Step is 26000000 / 2^16 => 0,0004Mhz
-        // so 128 is 0.05MHz deviation MAX 
-        // so from 433.77 to 433.87
-        while ( index <= 128 ) {
-            scanned = 0x10AF75 - index;
+        // so REG_SCAN_LOOP=128 => 0.05MHz step
+        // so scan is from 433.77 to 433.87
+        while ( index <= REG_SCAN_LOOP ) {
+            scanned = REG_DEFAULT - index;
             test_frequency_register(scanned);
             // Avoid duplicate on 1st loop
             if ( index > 0 ) {
-                scanned = 0x10AF75 + index;
+                scanned = REG_DEFAULT + index;
                 test_frequency_register(scanned);
             }
             index++;
         }
 
-        //time_t timestamp = time( NULL );
+        // Scan results
         sprintf(mqtt_topic, MQTT_TOPIC "%s/scan", meter_id);
 
         // Found frequency Range, setup in the middle
-        /*
-        if (f_min<450 && f_max>400) {
-            printf( "Working from %.4fMHz to %.4fMhz\n", f_min, f_max);
-            frequency = 433.82f + ((f_max - f_min) / 2);
-            printf( "Please use %.4f as frequency\n", frequency);
-            sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"min\":\"%.4f\", \"max\":\"%.4f\" } ",  getDate(), frequency,f_min, f_max );
-        */
-        if (r_min<(0x10AF75+128) && r_max>(0x10AF75-128)) {
-            printf( "Working from %06X to %06X\n", r_min, r_max);
+        if (r_min<(REG_DEFAULT+REG_SCAN_LOOP) && r_max>(REG_DEFAULT-REG_SCAN_LOOP)) {
+            printf( "Working from %06X to %06X => ", r_min, r_max);
             reg = r_min + ((r_max - r_min) / 2);
             frequency = (26.0f/65536.0f) * (float) reg;
             f_min = (26.0f/65536.0f) * (float) r_min;
             f_max = (26.0f/65536.0f) * (float) r_max;
+            printf( "%.4f to %.4f\n", f_min, f_max);
             printf( "Please use %.4f as frequency\n", frequency);
             sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"min\":\"%.4f\", \"max\":\"%.4f\" } ",  getDate(), frequency,f_min, f_max );
         } else {
             printf( "No working frequency found!\n");
             frequency = 0.0f;
-            sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\" } ",  getDate(), frequency );
+            sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.1f\" } ",  getDate(), frequency );
         }
         mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
@@ -426,13 +347,23 @@ int main(int argc, char *argv[])
             sprintf(buff, "%d", meter_data.reads_counter );
             mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
+            sprintf(mqtt_topic, MQTT_TOPIC "%s/rssi", meter_id);
+            sprintf(buff, "%d", meter_data.rssi );
+            mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
+
+            sprintf(mqtt_topic, MQTT_TOPIC "%s/lqi", meter_id);
+            sprintf(buff, "%d", meter_data.lqi );
+            mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
+
         } else {
+
             printf("No data, are you in business hours?\n");
             sprintf(mqtt_topic, MQTT_TOPIC "%s/error", meter_id);
             sprintf(buff, "{ \"date\":\"%s\", \"type\":\"No Data\" }",  getDate() );
             mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
         }
-        delay(1000);
+        // Let MQTT finish
+        sleep(1);
     }
 
     clean_exit(0);
