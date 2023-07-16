@@ -145,23 +145,23 @@ void IO_init(void)
     digitalWrite(LED_RED, LOW);
     #endif
     #ifdef LED_GRN
-    // Light green LED on start
 	pinMode (LED_GRN, OUTPUT);
-    digitalWrite(LED_GRN, HIGH);
+    digitalWrite(LED_GRN, LOW);
     #endif
     #ifdef LED_BLU
+    // Light bkue LED on start
 	pinMode (LED_BLU, OUTPUT);
-    digitalWrite(LED_BLU, LOW);
+    digitalWrite(LED_BLU, HIGH);
     #endif
 }
 
 // test a read on specified frequency
 bool test_frequency(float _frequency) 
 {
-    #ifdef LED_BLU
-    digitalWrite(LED_BLU, HIGH);
+    #ifdef LED_GRN
+    digitalWrite(LED_GRN, HIGH);
     delay(250);
-    digitalWrite(LED_BLU, LOW);
+    digitalWrite(LED_GRN, LOW);
     #endif
     printf("Test frequency : %.4fMHz => ", _frequency);
     fflush(stdout);
@@ -191,16 +191,16 @@ bool test_frequency(float _frequency)
 }
 
 // test a read on specified frequency using CC1101 register settings
-bool test_frequency_register(uint32_t reg) 
+bool test_frequency_register(uint32_t reg)  
 {
     // Skip only 3 bytes
     reg &= 0xFFFFFF;
     float _frequency = (26000000.0f/65536.0f) * (float) reg / 1000000.0f;
 
-    #ifdef LED_BLU
-    digitalWrite(LED_BLU, HIGH);
+    #ifdef LED_GRN
+    digitalWrite(LED_GRN, HIGH);
     delay(250);
-    digitalWrite(LED_BLU, LOW);
+    digitalWrite(LED_GRN, LOW);
     #endif
     printf("Test register : 0x%06X (%.4fMHz) => ", reg, _frequency);
     fflush(stdout);
