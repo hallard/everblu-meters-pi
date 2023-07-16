@@ -11,6 +11,8 @@ uint8_t PA[] =      {0x60,0x00,0x00,0x00,0x00,0x00,0x00,0x00,};
 uint8_t CC1101_status_state=0;
 uint8_t CC1101_status_FIFO_FreeByte=0;
 uint8_t CC1101_status_FIFO_ReadByte=0;
+int8_t  CC1101_rssi;
+int8_t  CC1101_lqi;
 uint8_t debug_out=0;
 
 struct tmeter_data {
@@ -19,6 +21,8 @@ struct tmeter_data {
     int battery_left;   // in months remaining
 	int time_start;     // like 8am
 	int time_end;       // like 4pm
+    int8_t rssi;        // Signal RSSI
+    int8_t lqi;         // Signal LQI
 	bool ok;            // True if read was ok
 };
 
@@ -402,13 +406,13 @@ uint8_t is_look_like_radian_frame(uint8_t* buffer, size_t len)
 uint8_t cc1101_check_packet_received(void)
 {
 	uint8_t rxBuffer[100];
-	uint8_t l_nb_byte,l_Rssi_dbm,l_lqi,l_freq_est,pktLen;
+	uint8_t l_nb_byte,l_freq_est,pktLen;
 	pktLen=0;
 	if ( digitalRead(GDO0) == TRUE ) {		
 		// get RF info at beginning of the frame
-		l_lqi= halRfReadReg(LQI_ADDR);
+		CC1101_lqi = halRfReadReg(LQI_ADDR) & 0x7F;
 		l_freq_est = halRfReadReg(FREQEST_ADDR);
-		l_Rssi_dbm = cc1100_rssi_convert2dbm(halRfReadReg(RSSI_ADDR));
+		CC1101_rssi = cc1100_rssi_convert2dbm(halRfReadReg(RSSI_ADDR));
 
 		while (digitalRead(GDO0) == TRUE) {
 			delay(5); //wait for some byte received
@@ -420,9 +424,8 @@ uint8_t cc1101_check_packet_received(void)
 		}
 
 		if (is_look_like_radian_frame(rxBuffer,pktLen))	{
-			echo_debug(debug_out,"\r\n");
-			print_time();
-			echo_debug(debug_out," bytes=%u rssi=%u lqi=%u F_est=%u ",pktLen,l_Rssi_dbm,l_lqi,l_freq_est);
+			echo_debug(debug_out,"\r\n%s", getDate() );
+			echo_debug(debug_out," bytes=%u rssi=%d lqi=%d F_est=%u ",pktLen,CC1101_rssi,CC1101_lqi,l_freq_est);
 			show_in_hex_one_line(rxBuffer,pktLen);
 			//show_in_bin(rxBuffer,l_nb_byte);		   
 		} else {
@@ -456,6 +459,10 @@ struct tmeter_data parse_meter_report (uint8_t *decoded_buffer , uint8_t size)
 	struct tmeter_data data;
 
 	if (size >= 30)	{   
+
+        data.rssi = CC1101_rssi;
+        data.lqi = CC1101_lqi;
+
 		//echo_debug(1,"\r\n%u/%u/20%u %u:%u:%u ",decoded_buffer[24],decoded_buffer[25],decoded_buffer[26],decoded_buffer[28],decoded_buffer[29],decoded_buffer[30]);
 		//echo_debug(1,"%u litres ",decoded_buffer[18]+decoded_buffer[19]*256 + decoded_buffer[20]*65536 + decoded_buffer[21]*16777216);
 		data.liters = decoded_buffer[18]+decoded_buffer[19]*256 + decoded_buffer[20]*65536 + decoded_buffer[21]*16777216;
