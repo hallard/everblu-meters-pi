@@ -205,10 +205,16 @@ bool test_frequency_register(uint32_t reg)
     printf("Test register : 0x%06X (%.4fMHz) => ", reg, _frequency);
     fflush(stdout);
     cc1101_init(0.0f, reg, false);
+    // Used for testing my code only by simulation
+    //if (_frequency>433.83f && _frequency<433.84f) {
+    //    meter_data.ok = true;
+    //} else {
+    //    meter_data.ok = false;
+    //}
     meter_data = get_meter_data();
     // Got datas ?
     if (meter_data.ok) {
-        printf("** OK **\n");
+        printf("** OK! **");
         // check working boundaries
         if (_frequency > f_max) {
             f_max = _frequency;
@@ -220,8 +226,12 @@ bool test_frequency_register(uint32_t reg)
         }
 
     } else {
-        printf("No answer\n");
+        printf("No answer");
     }
+    if (r_min<(0x10AF75+128) && r_max>(0x10AF75-128)) {
+        printf("    %.4f < Works < %.4f ", f_min, f_max);
+    }
+    printf("\n");
 
     char buff[256];
     sprintf(mqtt_topic, MQTT_TOPIC "%s/scanning", meter_id);
@@ -333,6 +343,8 @@ int main(int argc, char *argv[])
         uint32_t index = 0;
         r_min = reg + 128;
         r_max = reg - 128;
+        f_min = 450;
+        f_max = 400;
         // Step is 26000000 / 2^16 => 0,0004Mhz
         // so 128 is 0.05MHz deviation MAX 
         // so from 433.77 to 433.87
@@ -360,7 +372,7 @@ int main(int argc, char *argv[])
         */
         if (r_min<(0x10AF75+128) && r_max>(0x10AF75-128)) {
             printf( "Working from %06X to %06X\n", r_min, r_max);
-            reg = 0x10AF75 + ((r_max - r_min) / 2);
+            reg = r_min + ((r_max - r_min) / 2);
             frequency = (26.0f/65536.0f) * (float) reg;
             f_min = (26.0f/65536.0f) * (float) r_min;
             f_max = (26.0f/65536.0f) * (float) r_max;
