@@ -268,7 +268,7 @@ void cc1101_configureRF_0(float freq, uint32_t freg)
     } else {
         fprintf(stderr, "Wrong frequency parameter, set to 433.82MHz\n");
        	//setMHZ(433.8200f);
-        setFREQxRegister(0x10AF75); // value for 433.82MHz is 0x10AF75
+        setFREQxRegister(REG_DEFAULT); // value for 433.82MHz is 0x10AF75
     }
 	//halRfWriteReg(FREQ2,0x10);   //Frequency Control Word, High Byte  Base frequency = 433.82
 	//halRfWriteReg(FREQ1,0xAF);   //Frequency Control Word, Middle Byte
@@ -459,7 +459,7 @@ struct tmeter_data parse_meter_report (uint8_t *decoded_buffer , uint8_t size)
 	struct tmeter_data data;
 
 	if (size >= 30)	{   
-
+        // Fill signal values received in data incoming
         data.rssi = CC1101_rssi;
         data.lqi = CC1101_lqi;
 
@@ -551,7 +551,7 @@ int receive_radian_frame(int size_byte,int rx_tmo_ms ,uint8_t*rxBuffer,int rxBuf
 	uint16_t l_total_byte=0;
 	uint16_t l_radian_frame_size_byte = ((size_byte*(8+3))/8)+1;
 	int l_tmo=0;
-	uint8_t l_Rssi_dbm,l_lqi,l_freq_est;
+	uint8_t l_freq_est;
 
 	if (l_radian_frame_size_byte*4 > rxBuffer_size) {
 		echo_debug(debug_out,"buffer too small\r\n");
@@ -597,10 +597,10 @@ int receive_radian_frame(int size_byte,int rx_tmo_ms ,uint8_t*rxBuffer,int rxBuf
 		return 0;
 	}
 
-	l_lqi= halRfReadReg(LQI_ADDR);
+	CC1101_lqi = halRfReadReg(LQI_ADDR);
 	l_freq_est = halRfReadReg(FREQEST_ADDR);
-	l_Rssi_dbm = cc1100_rssi_convert2dbm(halRfReadReg(RSSI_ADDR));
-	echo_debug(debug_out," rssi=%u lqi=%u F_est=%u \r\n",l_Rssi_dbm,l_lqi,l_freq_est);
+	CC1101_rssi = cc1100_rssi_convert2dbm(halRfReadReg(RSSI_ADDR));
+	echo_debug(debug_out," rssi=%u lqi=%u F_est=%u \r\n",CC1101_rssi,CC1101_lqi,l_freq_est);
 
 	fflush(stdout);	
 	halRfWriteReg(SYNC1,0xFF);   //11111111
