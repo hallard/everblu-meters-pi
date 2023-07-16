@@ -203,53 +203,44 @@ void cc1101_reset(void)
 	CC1101_CMD(SFRX);	//flush the RX_fifo content -> a must for interrupt handling	
 }
 
+// Datasheet formula is easy
+// Frequency = ( 26000000 / 2^16 ) * Fregister
+// so default F register 0x10AF75 is 433.8198 MHz
+// F register = Frequency / ( 26000000 / 2^16 ) 
 void setMHZ(float mhz) 
 {
-    uint8_t freq2 = 0;
-    uint8_t freq1 = 0;
-    uint8_t freq0 = 0;
+    float reg = mhz / (26.0f/65536.0f);
+    uint32_t freg = (uint32_t) reg;
 
-    //printf("%.4f Mhz : ", mhz);
-    for (bool i = 0; i == 0;) {
-        if (mhz >= 26) {
-            mhz -= 26;
-            freq2 += 1;
-        } else if (mhz >= 0.1015625) {
-            mhz -= 0.1015625;
-            freq1 += 1;
-        } else if (mhz >= 0.00039675) {
-            mhz -= 0.00039675;
-            freq0 += 1;
-        } else { 
-            i = 1; 
-        }
-    }
-    if (freq0 > 255) { 
-        freq1 += 1; 
-        freq0 -= 256; 
-    }
-    
-    //printf(" %02X %02X %02X ", freq2, freq1, freq0);
-    halRfWriteReg(FREQ2, freq2);
-    halRfWriteReg(FREQ1, freq1);
-    halRfWriteReg(FREQ0, freq0);
-}
-
-void setFREQxRegister(uint16_t freg) 
-{
-    // value for 433.82MHz is 0x10AF75
-    // we scan only for last 2 bytes
-    uint8_t freq2 = 0x10;
-    uint8_t freq1 = (freg >> 8) & 0xFF ;
+    uint8_t freq2 = (freg >> 16) & 0xFF ;
+    uint8_t freq1 = (freg >>  8) & 0xFF ;
     uint8_t freq0 = freg & 0xFF ;
-    
-    //printf(" %02X %02X %02X ", freq2, freq1, freq0);
+   
+    //printf(" %.4fMHz=0x%02X%02X%02X ", mhz, freq2, freq1, freq0);
     halRfWriteReg(FREQ2, freq2);
     halRfWriteReg(FREQ1, freq1);
     halRfWriteReg(FREQ0, freq0);
 }
 
-void cc1101_configureRF_0(float freq, uint16_t freg)
+// Datasheet formula is easy
+// Frequency = ( 26000000 / 2^16 ) * Fregister
+void setFREQxRegister(uint32_t freg) 
+{
+    // Skip only 3 bytes
+    freg &= 0xFFFFFF;
+
+    uint8_t freq2 = (freg >> 16);
+    uint8_t freq1 = (freg >>  8) & 0xFF ;
+    uint8_t freq0 = freg & 0xFF ;
+
+    // float freq = (26.0f/65536.0f) * (float) freg;
+    //printf(" 0x%02X%02X%02X %.4fMHz ", freq2, freq1, freq0, freq);
+    halRfWriteReg(FREQ2, freq2);
+    halRfWriteReg(FREQ1, freq1);
+    halRfWriteReg(FREQ0, freq0);
+}
+
+void cc1101_configureRF_0(float freq, uint32_t freg)
 {
 	RF_config_u8=0;
 	//
@@ -268,11 +259,12 @@ void cc1101_configureRF_0(float freq, uint16_t freg)
 
     if ( freq != 0.0f ) {
     	setMHZ(freq);
-    } else if ( freg != 0x0000 ) {
+    } else if ( freg != 0 ) {
     	setFREQxRegister(freg);
     } else {
         fprintf(stderr, "Wrong frequency parameter, set to 433.82MHz\n");
-       	setMHZ(433.8200f);
+       	//setMHZ(433.8200f);
+        setFREQxRegister(0x10AF75); // value for 433.82MHz is 0x10AF75
     }
 	//halRfWriteReg(FREQ2,0x10);   //Frequency Control Word, High Byte  Base frequency = 433.82
 	//halRfWriteReg(FREQ1,0xAF);   //Frequency Control Word, Middle Byte
@@ -309,7 +301,7 @@ void cc1101_configureRF_0(float freq, uint16_t freg)
 	SPIWriteBurstReg(PATABLE_ADDR, PA, 8);  
 }
 
-bool  cc1101_init(float freq, uint16_t freg, bool show)
+bool  cc1101_init(float freq, uint32_t freg, bool show)
 {   
 	bool ret = false;
 	// to use SPI pi@MinePi ~ $ gpio unload spi  then gpio load spi   
