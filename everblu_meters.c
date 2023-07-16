@@ -168,6 +168,11 @@ bool test_frequency_register(uint32_t reg)
         }
     } else {
         printf("No answer");
+        #ifdef LED_RED
+        digitalWrite(LED_RED, HIGH);
+        delay(250);
+        digitalWrite(LED_RED, LOW);
+        #endif
     }
 
     // Found working boudaries?
