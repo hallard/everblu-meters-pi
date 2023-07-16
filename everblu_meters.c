@@ -26,6 +26,7 @@ struct mosquitto *mosq = NULL;
 char meter_id[32];
 char mqtt_topic[64];
 float f_min, f_max ; // Scan results
+uint32_t r_min, r_max ; // Scan results
 
 void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *message)
 {
@@ -153,27 +154,41 @@ bool test_frequency(float _frequency)
 }
 
 // test a read on specified frequency using CC1101 register settings
-bool test_frequency_register(uint16_t reg) 
+bool test_frequency_register(uint32_t reg) 
 {
+    // Skip only 3 bytes
+    reg &= 0xFFFFFF;
+    float _frequency = (26000000.0f/65536.0f) * (float) reg / 1000000.0f;
+
     #ifdef LED_BLU
     digitalWrite(LED_BLU, HIGH);
     delay(250);
     digitalWrite(LED_BLU, LOW);
     #endif
-    printf("Test register : %04X => ", reg);
+    printf("Test register : 0x%06X (%.4fMHz) => ", reg, _frequency);
     fflush(stdout);
     cc1101_init(0.0f, reg, false);
     meter_data = get_meter_data();
     // Got datas ?
     if (meter_data.ok) {
         printf("** OK **\n");
+        // check working boundaries
+        if (_frequency > f_max) {
+            f_max = _frequency;
+            r_max = reg;
+        }
+        if (_frequency < f_min) {
+            f_min = _frequency;
+            r_min = reg;
+        }
+
     } else {
         printf("No answer\n");
     }
 
     char buff[256];
     sprintf(mqtt_topic, MQTT_TOPIC "%s/scanning", meter_id);
-    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"register\":\"%04X\", \"result\":%d }",  getDate(), 0.0f, reg, meter_data.ok );
+    sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"register\":\"0x%06X\", \"result\":%d }",  getDate(), _frequency, reg, meter_data.ok );
     mosquitto_publish(mosq, NULL, mqtt_topic, strlen(buff),buff,0,true);
 
     return meter_data.ok;
@@ -249,29 +264,61 @@ int main(int argc, char *argv[])
 
     // Scan all frequencies
     if ( frequency == 0.0f ) {
-
+        /*
         frequency = 433.82f;
         f_min = 450;
         f_max = 400;
         float fdev = 0.0f;
         float scanned = frequency;
-
         // Scan from 433.76 to 433.89 thru 0.0005 step
-        while (fdev <  0.005 /*(433.89f-433.82f)*/ ) {
+        // value for 433.82MHz is 0x10AF75
+        // we scan only for last 2 bytes
+        while (fdev <  (433.89f-433.82f) ) {
             scanned = 433.82f + fdev;
             test_frequency(scanned);
             scanned = 433.82f - fdev;
             test_frequency(scanned);
             fdev = fdev + 0.0005f;
         }
+        */
+
+        // value for 433.82MHz is 0x10AF75
+        uint32_t reg = 0x10AF75;
+        uint32_t scanned = reg;
+        uint32_t index = 0;
+        r_min = reg + 128;
+        r_max = reg - 128;
+        // Step is 26000000 / 2^16 => 0,0004Mhz
+        // so 128 is 0.05MHz deviation MAX 
+        // so from 433.77 to 433.87
+        while ( index <= 128 ) {
+            scanned = 0x10AF75 - index;
+            test_frequency_register(scanned);
+            // Avoid duplicate on 1st loop
+            if ( index > 0 ) {
+                scanned = 0x10AF75 + index;
+                test_frequency_register(scanned);
+            }
+            index++;
+        }
 
         //time_t timestamp = time( NULL );
         sprintf(mqtt_topic, MQTT_TOPIC "%s/scan", meter_id);
 
         // Found frequency Range, setup in the middle
+        /*
         if (f_min<450 && f_max>400) {
             printf( "Working from %.4fMHz to %.4fMhz\n", f_min, f_max);
             frequency = 433.82f + ((f_max - f_min) / 2);
+            printf( "Please use %.4f as frequency\n", frequency);
+            sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"min\":\"%.4f\", \"max\":\"%.4f\" } ",  getDate(), frequency,f_min, f_max );
+        */
+        if (r_min<(0x10AF75+128) && r_max>(0x10AF75-128)) {
+            printf( "Working from %06X to %06X\n", r_min, r_max);
+            reg = 0x10AF75 + ((r_max - r_min) / 2);
+            frequency = (26.0f/65536.0f) * (float) reg;
+            f_min = (26.0f/65536.0f) * (float) r_min;
+            f_max = (26.0f/65536.0f) * (float) r_max;
             printf( "Please use %.4f as frequency\n", frequency);
             sprintf(buff, "{ \"date\":\"%s\", \"frequency\":\"%.4f\", \"min\":\"%.4f\", \"max\":\"%.4f\" } ",  getDate(), frequency,f_min, f_max );
         } else {
@@ -285,10 +332,10 @@ int main(int argc, char *argv[])
         //time_t timestamp = time( NULL );
         char ts[64];
         sprintf(ts, "%s", getDate() );
-
         #ifdef LED_RED
         digitalWrite(LED_RED, HIGH);
         #endif
+        printf( "Trying to query Cyble at %.4fMHz\n", frequency);
         cc1101_init(frequency, 0, false);
         meter_data = get_meter_data();
         #ifdef LED_RED
